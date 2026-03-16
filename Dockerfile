@@ -17,20 +17,21 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Step 1: Install PyTorch CPU (smallest version, no CUDA)
+# Step 1: Install PyTorch CPU only
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Step 2: Install av separately (needs FFmpeg dev libs)
-RUN pip install --no-cache-dir "av==11.0.0"
+# Step 2: Install av - use latest version compatible with newer FFmpeg
+RUN pip install --no-cache-dir "av>=12.0.0"
 
-# Step 3: Install transformers stack
+# Step 3: Install faster-whisper with compatible av
+RUN pip install --no-cache-dir "faster-whisper==1.0.1" --no-deps
+RUN pip install --no-cache-dir ctranslate2 huggingface-hub tokenizers onnxruntime tqdm
+
+# Step 4: Install transformers stack
 RUN pip install --no-cache-dir \
     "transformers==4.40.2" \
     "tokenizers==0.19.1" \
     "sentence-transformers==2.7.0"
-
-# Step 4: Install faster-whisper
-RUN pip install --no-cache-dir "faster-whisper==1.0.1"
 
 # Step 5: Install remaining dependencies
 RUN pip install --no-cache-dir \
