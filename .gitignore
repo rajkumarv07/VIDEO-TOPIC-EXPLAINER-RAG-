@@ -1,0 +1,17 @@
+# Never commit these
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+
+# Uploads (temp files)
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
