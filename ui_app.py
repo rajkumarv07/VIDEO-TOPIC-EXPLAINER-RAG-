@@ -6,14 +6,11 @@ import os
 import time
 import tempfile
 import requests
-
-# ── Load .env BEFORE importing streamlit ─────────────────────────────────────
 from dotenv import load_dotenv
 load_dotenv()
 
 import streamlit as st
 
-# ── MUST be the very first Streamlit call ─────────────────────────────────────
 st.set_page_config(
     page_title="Video Topic Explainer",
     page_icon="🎬",
@@ -21,15 +18,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── Load Streamlit Cloud secrets into env vars ────────────────────────────────
 try:
     for key, val in st.secrets.items():
         os.environ.setdefault(key, str(val))
 except Exception:
     pass
 
-# ── Constants ─────────────────────────────────────────────────────────────────
-API_BASE = os.getenv("API_BASE_URL", "https://video-topic-explainer-rag-1.onrender.com")
+API_BASE = "https://video-topic-explainer-rag-1.onrender.com"
 ALLOWED_TYPES = ["mp4", "mov", "mkv", "avi", "webm"]
 MODEL_OPTIONS = {
     "llama-3.1-8b-instant": "⚡ Llama 3.1 8B — Fast",
@@ -42,7 +37,6 @@ WHISPER_OPTIONS = {
     "small": "Small — More Accurate",
 }
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
@@ -67,52 +61,36 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 def format_time(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)
     return f"{m:02d}:{s:02d}"
 
 def check_api_health() -> bool:
     try:
-        r = requests.get(f"{API_BASE}/health", timeout=5)
+        r = requests.get(f"{API_BASE}/health", timeout=10)
         return r.status_code == 200
     except Exception:
         return False
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
     st.divider()
-
-    llm_model = st.radio(
-        "LLM Model",
-        options=list(MODEL_OPTIONS.keys()),
-        format_func=lambda k: MODEL_OPTIONS[k],
-        index=0
-    )
-
-    whisper_model = st.radio(
-        "Whisper Model",
-        options=list(WHISPER_OPTIONS.keys()),
-        format_func=lambda k: WHISPER_OPTIONS[k],
-        index=1
-    )
-
+    llm_model = st.radio("LLM Model", options=list(MODEL_OPTIONS.keys()),
+                         format_func=lambda k: MODEL_OPTIONS[k], index=0)
+    whisper_model = st.radio("Whisper Model", options=list(WHISPER_OPTIONS.keys()),
+                              format_func=lambda k: WHISPER_OPTIONS[k], index=0)
     top_n = st.slider("Topics to Extract", min_value=3, max_value=10, value=7)
     language = st.text_input("Language Code (optional)", placeholder="e.g., en, hi, es")
-
     st.divider()
     api_ok = check_api_health()
     if api_ok:
         st.markdown('<div class="status-badge">● API Connected</div>', unsafe_allow_html=True)
-        st.caption(f"Backend: {API_BASE}")
     else:
         st.error("⚠ API Offline")
-        st.caption(f"Trying: {API_BASE}")
+    st.caption(f"Backend: {API_BASE}")
 
 
-# ── Main UI ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="main-header">
     <h1>🎬 VIDEO TOPIC EXPLAINER</h1>
@@ -153,7 +131,6 @@ with col_info:
     </div>""", unsafe_allow_html=True)
 
 
-# ── Processing ────────────────────────────────────────────────────────────────
 if uploaded_file and process_btn:
     if not api_ok:
         st.error("❌ Backend API is not reachable.")
@@ -165,14 +142,14 @@ if uploaded_file and process_btn:
     status_text = st.empty()
 
     try:
-        status_text.info("📤 Saving video...")
+        status_text.info("📤 Preparing video...")
         progress_bar.progress(10)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{uploaded_file.name}") as tmp:
             tmp.write(uploaded_file.read())
             tmp_path = tmp.name
 
-        status_text.info("🚀 Sending to backend for processing...")
+        status_text.info("🚀 Sending to backend... (this may take 1-2 min on first run)")
         progress_bar.progress(30)
         start_time = time.time()
 
@@ -198,13 +175,13 @@ if uploaded_file and process_btn:
                 detail = response.json().get("detail", response.text)
             except Exception:
                 detail = response.text
-            st.error(f"❌ Processing failed: {detail}")
+            st.error(f"❌ Processing failed (HTTP {response.status_code}): {detail}")
+            st.code(response.text[:1000])
             st.stop()
 
         data = response.json()
         status_text.success(f"✅ Done in {elapsed:.1f}s!")
 
-        # ── Results ───────────────────────────────────────────────────────────
         st.divider()
         st.markdown("### 📊 Results")
 
@@ -215,33 +192,28 @@ if uploaded_file and process_btn:
 
         st.markdown("")
 
-        # Topics
         st.markdown('<div class="result-card"><h3>🔍 Detected Topics</h3>', unsafe_allow_html=True)
         pills_html = "".join(f'<span class="topic-pill">{t}</span>' for t in data["topics"])
         st.markdown(pills_html + "</div>", unsafe_allow_html=True)
 
-        # Explanations
         st.markdown(f"""
         <div class="result-card">
             <h3>🤖 LLM Explanations · <span style="color:rgba(255,255,255,0.3);">{data.get('model_used','')}</span></h3>
             <div class="explanation-text">{data['explanation']}</div>
         </div>""", unsafe_allow_html=True)
 
-        # Download
-        notes = f"# Video Study Notes\n\n## Topics\n"
+        notes = "# Video Study Notes\n\n## Topics\n"
         notes += "\n".join(f"- {t}" for t in data["topics"])
         notes += f"\n\n## Explanations\n\n{data['explanation']}"
         notes += f"\n\n## Transcript\n\n{data['transcript']}"
         st.download_button("⬇ Download Study Notes (.md)", data=notes,
-                          file_name="study_notes.md", mime="text/markdown",
-                          use_container_width=True)
+                           file_name="study_notes.md", mime="text/markdown",
+                           use_container_width=True)
 
-        # Transcript
         with st.expander("📝 Full Transcript"):
             st.markdown(f'<div class="transcript-text">{data["transcript"]}</div>',
-                       unsafe_allow_html=True)
+                        unsafe_allow_html=True)
 
-        # Timestamped segments
         if data.get("segments"):
             with st.expander("⏱ Timestamped Segments"):
                 html = ""
@@ -250,8 +222,8 @@ if uploaded_file and process_btn:
                 st.markdown(html, unsafe_allow_html=True)
 
     except requests.exceptions.ConnectionError:
-        st.error("❌ Cannot connect to the backend API.")
+        st.error("❌ Cannot connect to backend.")
     except requests.exceptions.Timeout:
-        st.error("⏱ Request timed out. Try a shorter video clip.")
+        st.error("⏱ Request timed out. Try a shorter clip (under 2 minutes).")
     except Exception as e:
         st.exception(e)
