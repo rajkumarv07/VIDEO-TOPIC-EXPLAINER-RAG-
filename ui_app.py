@@ -32,9 +32,9 @@ MODEL_OPTIONS = {
     "mixtral-saba-24b": "⚖️ Mixtral Saba 24B — Balanced",
 }
 WHISPER_OPTIONS = {
-    "tiny": "Tiny — Fastest",
-    "base": "Base — Recommended",
-    "small": "Small — More Accurate",
+    "tiny": "Tiny — Fastest (recommended for Render)",
+    "base": "Base — Better accuracy",
+    "small": "Small — Best accuracy (slow)",
 }
 
 st.markdown("""
@@ -54,9 +54,13 @@ st.markdown("""
     .segment-time { font-family: 'Space Mono', monospace; color: var(--accent); font-size: 0.78rem; min-width: 90px; }
     .segment-text { color: #C8D6E5; }
     .status-badge { display: inline-flex; align-items: center; gap: 0.4rem; background: rgba(0,212,170,0.1); border: 1px solid rgba(0,212,170,0.25); color: #00D4AA; border-radius: 100px; padding: 0.25rem 0.75rem; font-size: 0.8rem; font-family: 'Space Mono', monospace; }
+    .pipeline-step { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0; font-size: 0.88rem; color: rgba(255,255,255,0.4); }
+    .pipeline-step.done { color: #00D4AA; }
+    .pipeline-step.active { color: #E8EDF5; }
     section[data-testid="stSidebar"] { background: #080C16 !important; border-right: 1px solid var(--border) !important; }
     .stButton > button { background: linear-gradient(135deg, #00D4AA, #0097B2) !important; color: #0A0E1A !important; border: none !important; border-radius: 8px !important; font-family: 'Space Mono', monospace !important; font-weight: 700 !important; width: 100% !important; }
     div[data-testid="metric-container"] { background: var(--bg-card) !important; border: 1px solid var(--border) !important; border-radius: 10px !important; padding: 1rem !important; }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] { color: var(--accent) !important; font-family: 'Space Mono', monospace !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -73,6 +77,7 @@ def check_api_health() -> bool:
         return False
 
 
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
     st.divider()
@@ -89,8 +94,17 @@ with st.sidebar:
     else:
         st.error("⚠ API Offline")
     st.caption(f"Backend: {API_BASE}")
+    st.divider()
+    st.markdown("""
+    <div style="font-size:0.8rem; color:rgba(255,255,255,0.35); line-height:1.9;">
+    Video → Audio Extraction<br>
+    → Faster-Whisper STT<br>
+    → Groq LLM Topics<br>
+    → Groq LLM Explanation
+    </div>""", unsafe_allow_html=True)
 
 
+# ── Main UI ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="main-header">
     <h1>🎬 VIDEO TOPIC EXPLAINER</h1>
@@ -128,9 +142,18 @@ with col_info:
             <b style="color:#E8EDF5;">4.</b> Groq LLM explains each topic<br>
             <b style="color:#E8EDF5;">5.</b> Read, learn, take notes!
         </div>
+    </div>
+    <div class="result-card">
+        <h3>💡 Best for</h3>
+        <div style="font-size:0.88rem; color:#9AABB8; line-height:1.8;">
+            Instagram Reels · YouTube Shorts<br>
+            Tech tutorials · Lecture clips<br>
+            Conference talks · Explainers
+        </div>
     </div>""", unsafe_allow_html=True)
 
 
+# ── Processing ────────────────────────────────────────────────────────────────
 if uploaded_file and process_btn:
     if not api_ok:
         st.error("❌ Backend API is not reachable.")
@@ -138,20 +161,46 @@ if uploaded_file and process_btn:
 
     st.divider()
     st.markdown("### ⚙️ Processing")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+
+    step_col, prog_col = st.columns([1, 2])
+    with prog_col:
+        progress_bar = st.progress(0)
+    with step_col:
+        step_placeholder = st.empty()
+
+    def show_step(current):
+        steps = [
+            ("📤", "Uploading video"),
+            ("🔊", "Extracting audio"),
+            ("🗣️", "Transcribing speech"),
+            ("🔍", "Extracting topics"),
+            ("🤖", "Generating explanations"),
+        ]
+        html = ""
+        for i, (icon, label) in enumerate(steps):
+            if i < current:
+                cls = "done"; mark = "✓"
+            elif i == current:
+                cls = "active"; mark = "▶"
+            else:
+                cls = ""; mark = "○"
+            html += f'<div class="pipeline-step {cls}">{icon} {mark} {label}</div>'
+        step_placeholder.markdown(html, unsafe_allow_html=True)
 
     try:
-        status_text.info("📤 Preparing video...")
+        show_step(0)
         progress_bar.progress(10)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{uploaded_file.name}") as tmp:
             tmp.write(uploaded_file.read())
             tmp_path = tmp.name
 
-        status_text.info("🚀 Sending to backend... (this may take 1-2 min on first run)")
-        progress_bar.progress(30)
+        show_step(1)
+        progress_bar.progress(25)
         start_time = time.time()
+
+        show_step(2)
+        progress_bar.progress(40)
 
         with open(tmp_path, "rb") as f:
             response = requests.post(
@@ -163,11 +212,13 @@ if uploaded_file and process_btn:
                     "top_n_topics": top_n,
                     "language": language.strip() if language else ""
                 },
-                timeout=300
+                timeout=600   # 10 minutes — Render needs time to load models
             )
 
         os.unlink(tmp_path)
         elapsed = time.time() - start_time
+
+        show_step(4)
         progress_bar.progress(100)
 
         if response.status_code != 200:
@@ -180,8 +231,8 @@ if uploaded_file and process_btn:
             st.stop()
 
         data = response.json()
-        status_text.success(f"✅ Done in {elapsed:.1f}s!")
 
+        # ── Results ───────────────────────────────────────────────────────────
         st.divider()
         st.markdown("### 📊 Results")
 
@@ -191,39 +242,46 @@ if uploaded_file and process_btn:
         mc3.metric("Processing Time", f"{elapsed:.1f}s")
 
         st.markdown("")
+        tab1, tab2, tab3 = st.tabs(["🧠 Explanations", "🔍 Topics", "📝 Transcript"])
 
-        st.markdown('<div class="result-card"><h3>🔍 Detected Topics</h3>', unsafe_allow_html=True)
-        pills_html = "".join(f'<span class="topic-pill">{t}</span>' for t in data["topics"])
-        st.markdown(pills_html + "</div>", unsafe_allow_html=True)
+        with tab2:
+            st.markdown('<div class="result-card"><h3>🔍 Detected Topics</h3>', unsafe_allow_html=True)
+            pills_html = "".join(f'<span class="topic-pill">{t}</span>' for t in data["topics"])
+            st.markdown(pills_html + "</div>", unsafe_allow_html=True)
 
-        st.markdown(f"""
-        <div class="result-card">
-            <h3>🤖 LLM Explanations · <span style="color:rgba(255,255,255,0.3);">{data.get('model_used','')}</span></h3>
-            <div class="explanation-text">{data['explanation']}</div>
-        </div>""", unsafe_allow_html=True)
+        with tab1:
+            st.markdown(f"""
+            <div class="result-card">
+                <h3>🤖 LLM Explanations · <span style="color:rgba(255,255,255,0.3);">{data.get('model_used','')}</span></h3>
+                <div class="explanation-text">{data['explanation']}</div>
+            </div>""", unsafe_allow_html=True)
 
-        notes = "# Video Study Notes\n\n## Topics\n"
-        notes += "\n".join(f"- {t}" for t in data["topics"])
-        notes += f"\n\n## Explanations\n\n{data['explanation']}"
-        notes += f"\n\n## Transcript\n\n{data['transcript']}"
-        st.download_button("⬇ Download Study Notes (.md)", data=notes,
-                           file_name="study_notes.md", mime="text/markdown",
-                           use_container_width=True)
+            notes = "# Video Study Notes\n\n## Topics\n"
+            notes += "\n".join(f"- {t}" for t in data["topics"])
+            notes += f"\n\n## Explanations\n\n{data['explanation']}"
+            notes += f"\n\n## Transcript\n\n{data['transcript']}"
+            st.download_button("⬇ Download Study Notes (.md)", data=notes,
+                               file_name="study_notes.md", mime="text/markdown",
+                               use_container_width=True)
 
-        with st.expander("📝 Full Transcript"):
-            st.markdown(f'<div class="transcript-text">{data["transcript"]}</div>',
-                        unsafe_allow_html=True)
+        with tab3:
+            t1, t2 = st.tabs(["Full Text", "With Timestamps"])
+            with t1:
+                st.markdown(f'<div class="result-card"><h3>📝 Full Transcript</h3><div class="transcript-text">{data["transcript"]}</div></div>',
+                            unsafe_allow_html=True)
+            with t2:
+                if data.get("segments"):
+                    html = '<div class="result-card"><h3>⏱ Timestamped Segments</h3>'
+                    for seg in data["segments"]:
+                        html += f'<div class="segment-row"><span class="segment-time">{format_time(seg["start"])} → {format_time(seg["end"])}</span><span class="segment-text">{seg["text"]}</span></div>'
+                    html += "</div>"
+                    st.markdown(html, unsafe_allow_html=True)
 
-        if data.get("segments"):
-            with st.expander("⏱ Timestamped Segments"):
-                html = ""
-                for seg in data["segments"]:
-                    html += f'<div class="segment-row"><span class="segment-time">{format_time(seg["start"])} → {format_time(seg["end"])}</span><span class="segment-text">{seg["text"]}</span></div>'
-                st.markdown(html, unsafe_allow_html=True)
+        st.success(f"✅ {data.get('message', 'Analysis complete!')} ({elapsed:.1f}s)")
 
     except requests.exceptions.ConnectionError:
         st.error("❌ Cannot connect to backend.")
     except requests.exceptions.Timeout:
-        st.error("⏱ Request timed out. Try a shorter clip (under 2 minutes).")
+        st.error("⏱ Request timed out. The Render free tier may be overloaded — try again in 1 minute, or use a clip under 1 minute.")
     except Exception as e:
         st.exception(e)
